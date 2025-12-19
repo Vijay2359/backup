@@ -1,0 +1,55 @@
+FROM python:3.10-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ----------------------------
+# System dependencies
+# ----------------------------
+RUN apt-get update && apt-get install -y \
+    git wget curl build-essential libgl1 unzip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/ComfyUI
+
+# ----------------------------
+# Clone ComfyUI
+# ----------------------------
+RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI
+
+# ----------------------------
+# Clone JSON→Python extension
+# ----------------------------
+RUN mkdir -p /workspace/ComfyUI/custom_nodes && \
+    git clone https://github.com/pydn/ComfyUI-to-Python-Extension.git \
+      /workspace/ComfyUI/custom_nodes/ComfyUI-to-Python-Extension
+
+# ----------------------------
+# Install Python dependencies
+# ----------------------------
+RUN pip install --upgrade pip
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+RUN pip install -r /workspace/ComfyUI/requirements.txt
+RUN pip install -r /workspace/ComfyUI/custom_nodes/ComfyUI-to-Python-Extension/requirements.txt
+
+# ----------------------------
+# Patch ComfyUI for CPU-only
+# ----------------------------
+RUN sed -i 's/return torch.device(torch.cuda.current_device())/return torch.device("cpu")/' \
+        /workspace/ComfyUI/comfy/model_management.py && \
+    sed -i 's/total_vram = get_total_memory(get_torch_device()) \/ (1024 \* 1024)/total_vram = 0/' \
+        /workspace/ComfyUI/comfy/model_management.py
+
+# ----------------------------
+# Patch extension for headless mode (remove server references)
+# ----------------------------
+RUN sed -i '/import server/d' /workspace/ComfyUI/custom_nodes/ComfyUI-to-Python-Extension/comfyui_to_python_utils.py
+RUN sed -i '/server_instance/d' /workspace/ComfyUI/custom_nodes/ComfyUI-to-Python-Extension/comfyui_to_python_utils.py
+RUN sed -i '/PromptQueue/d' /workspace/ComfyUI/custom_nodes/ComfyUI-to-Python-Extension/comfyui_to_python_utils.py
+RUN sed -i '/loop/d' /workspace/ComfyUI/custom_nodes/ComfyUI-to-Python-Extension/comfyui_to_python_utils.py
+
+# ----------------------------
+# Entrypoint
+# ----------------------------
+WORKDIR /workspace/ComfyUI
+ENTRYPOINT ["python", "custom_nodes/ComfyUI-to-Python-Extension/comfyui_to_python.py"]
+
